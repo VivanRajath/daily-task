@@ -101,12 +101,15 @@ class TursoHTTPCursor:
                 if exec_result.get("type") == "ok":
                     resp = exec_result.get("response", {})
                     
+                    # CRITICAL FIX: The actual data is nested under "result" in the response!
+                    result = resp.get("result", {})
+                    
                     # Columns
-                    cols = resp.get("cols", [])
+                    cols = result.get("cols", [])
                     self.columns = [c["name"] for c in cols]
                     
                     # Rows
-                    result_rows = resp.get("rows", [])
+                    result_rows = result.get("rows", [])
                     parsed_rows = []
                     for row in result_rows:
                         parsed_row = []
@@ -160,7 +163,7 @@ class TursoHTTPConnection:
     def __init__(self, url, token):
         self.url = url
         self.token = token
-        self.row_factory = None
+        self.row_factory = True  # Enable dict conversion for rows
 
     def cursor(self):
         return TursoHTTPCursor(self)
@@ -244,36 +247,41 @@ class TaskDatabase:
         conn.close()
     
     def add_task(self, task_name: str, category: str = "General", priority: int = 1) -> int:
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        # Uses RETURNING id for Turso (since lastrowid helper is hard in HTTP)
-        # SQLite 3.35+ supports RETURNING. Turso supports it.
-        # But local SQLite might be old.
-        # We handle both.
-        
-        if self.use_turso:
-            sql = "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?) RETURNING id"
-            cursor.execute(sql, (task_name, category, priority))
-            row = cursor.fetchone()
-            if row:
-                if isinstance(row, dict):
-                    task_id = row['id']
-                else:
-                    task_id = row[0]
-            else:
-                # Should not happen, but fallback
-                task_id = -1
-        else:
-            cursor.execute(
-                "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?)",
-                (task_name, category, priority)
-            )
-            task_id = cursor.lastrowid
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
             
-        conn.commit()
-        conn.close()
-        return task_id
+            # Uses RETURNING id for Turso (since lastrowid helper is hard in HTTP)
+            # SQLite 3.35+ supports RETURNING. Turso supports it.
+            # But local SQLite might be old.
+            # We handle both.
+            
+            if self.use_turso:
+                sql = "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?) RETURNING id"
+                cursor.execute(sql, (task_name, category, priority))
+                row = cursor.fetchone()
+                if row:
+                    if isinstance(row, dict):
+                        task_id = row['id']
+                    else:
+                        task_id = row[0]
+                else:
+                    # Should not happen, but fallback
+                    task_id = -1
+            else:
+                cursor.execute(
+                    "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?)",
+                    (task_name, category, priority)
+                )
+                task_id = cursor.lastrowid
+                
+            conn.commit()
+            conn.close()
+            return task_id
+        except Exception as e:
+            print(f"Error adding task: {e}")
+            raise e
+
     
     def get_all_tasks(self, active_only: bool = True) -> List[Dict]:
         conn = self.get_connection()
@@ -284,11 +292,6 @@ class TaskDatabase:
         else:
             cursor.execute("SELECT * FROM tasks ORDER BY priority DESC, task_name")
         
-        # If Turso, rows are already dicts if row_factory logic worked or handled in method
-        # My TursoHTTPCursor.fetchall converts to dict if self.connection.row_factory is set
-        # But wait, I set row_factory=None in __init__ of TursoHTTPConnection
-        # I should simulate it.
-        
         rows = cursor.fetchall()
         
         # Normalize to list of dicts
@@ -297,7 +300,6 @@ class TaskDatabase:
             if isinstance(row, dict):
                 tasks.append(row)
             else:
-                # Should not happen if I use row_factory=sqlite3.Row logic or my custom dict converter
                 # Local SQLite with row_factory returns sqlite3.Row which is dict-like
                 tasks.append(dict(row))
                 
