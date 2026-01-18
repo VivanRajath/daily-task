@@ -124,17 +124,11 @@ class TursoHTTPCursor:
                     
                     self.rows = parsed_rows
                     self.rowcount = len(parsed_rows)
-                    
-                    # For INSERTs, we might need last_insert_rowid() if using it.
-                    # Standard SQL doesn't return it in response unless RETURNING is used
-                    # or separate query. For now, we ignore lastrowid or use RETURNING.
-                    # Current app usages:
-                    # add_task -> uses cursor.lastrowid
-                    # record_spin -> uses cursor.lastrowid
-                    
-                    # If it was an INSERT, we need to handle lastrowid.
-                    # Since we can't easily get it from standard response without RETURNING,
-                    # We might need to modify queries or run a second query in the same pipeline.
+                elif exec_result.get("type") == "error":
+                    print(f"Turso API Error: {exec_result.get('message')}")
+            else:
+                 print(f"Turso API returned no results. Data: {data}")
+
         except Exception as e:
             print(f"Turso HTTP Error: {e}")
             raise e
@@ -262,11 +256,14 @@ class TaskDatabase:
             sql = "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?) RETURNING id"
             cursor.execute(sql, (task_name, category, priority))
             row = cursor.fetchone()
-            # row might be dict or tuple
-            if isinstance(row, dict):
-                task_id = row['id']
+            if row:
+                if isinstance(row, dict):
+                    task_id = row['id']
+                else:
+                    task_id = row[0]
             else:
-                task_id = row[0]
+                # Should not happen, but fallback
+                task_id = -1
         else:
             cursor.execute(
                 "INSERT INTO tasks (task_name, category, priority) VALUES (?, ?, ?)",
@@ -356,7 +353,9 @@ class TaskDatabase:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) as count FROM tasks WHERE active = 1")
         row = cursor.fetchone()
-        if isinstance(row, dict):
+        if row is None:
+             count = 0
+        elif isinstance(row, dict):
             count = row['count']
         elif hasattr(row, 'keys'): # sqlite3.Row
             count = row['count']
@@ -373,10 +372,13 @@ class TaskDatabase:
             sql = "INSERT INTO spin_history (task_id, notes) VALUES (?, ?) RETURNING id"
             cursor.execute(sql, (task_id, notes))
             row = cursor.fetchone()
-            if isinstance(row, dict):
-                spin_id = row['id']
+            if row:
+                if isinstance(row, dict):
+                    spin_id = row['id']
+                else:
+                    spin_id = row[0]
             else:
-                spin_id = row[0]
+                spin_id = -1
         else:
             cursor.execute(
                 "INSERT INTO spin_history (task_id, notes) VALUES (?, ?)",
@@ -481,11 +483,17 @@ class TaskDatabase:
         
         cursor.execute("SELECT COUNT(*) as count FROM spin_history WHERE completed = 1")
         row = cursor.fetchone()
-        completed = row['count'] if isinstance(row, dict) else row[0]
+        if row is None:
+            completed = 0
+        else:
+            completed = row['count'] if isinstance(row, dict) else row[0]
         
         cursor.execute("SELECT COUNT(*) as count FROM spin_history")
         row = cursor.fetchone()
-        total = row['count'] if isinstance(row, dict) else row[0]
+        if row is None:
+            total = 0
+        else:
+            total = row['count'] if isinstance(row, dict) else row[0]
         
         conn.close()
         return (completed / total * 100) if total > 0 else 0
