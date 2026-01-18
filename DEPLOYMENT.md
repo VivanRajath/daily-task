@@ -77,10 +77,63 @@ Once deployed:
 
 ## Important Notes
 
+### Database Setup (REQUIRED - DO THIS FIRST!)
+
+⚠️ **Your app will lose data after sleeping unless you set up Turso!**
+
+#### Step 1: Install Turso CLI
+
+**Windows (PowerShell):**
+```powershell
+irm get.turso.tech/install.ps1 | iex
+```
+
+**Mac/Linux:**
+```bash
+curl -sSfL https://get.turso.tech/install.sh | bash
+```
+
+#### Step 2: Create Database
+```bash
+turso auth signup
+turso db create task-spinner-db
+```
+
+#### Step 3: Get Credentials
+```bash
+# Get database URL
+turso db show task-spinner-db --url
+
+# Get auth token
+turso db tokens create task-spinner-db
+```
+
+#### Step 4: Configure Streamlit Secrets
+
+**For Local Testing** - Create `.streamlit\secrets.toml`:
+```toml
+[turso]
+database_url = "libsql://task-spinner-db-yourname.turso.io"
+auth_token = "eyJhbGciOiJFZERTQSI..."
+```
+
+**For Streamlit Cloud** - After deployment:
+1. Go to https://share.streamlit.io → Your app → Settings → Secrets
+2. Paste:
+```toml
+[turso]
+database_url = "libsql://task-spinner-db-yourname.turso.io"
+auth_token = "eyJhbGciOiJFZERTQSI..."
+```
+3. Click Save
+
+> 📖 **Full Setup Guide**: See `turso_setup.md` for detailed instructions
+
 ### Database Storage
-- Database file is gitignored (won't be pushed to GitHub)
-- On Streamlit Cloud, database persists within app storage
-- Your data is private and secure
+- ✅ Database is now stored in Turso (cloud)
+- ✅ Data persists even when app sleeps
+- ✅ Free tier: 9GB storage, 500 databases
+- If Turso is not configured, falls back to local SQLite (data will be lost)
 
 ### Free Tier Limits
 - Streamlit Community Cloud is free forever
